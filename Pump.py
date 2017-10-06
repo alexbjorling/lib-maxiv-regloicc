@@ -1,96 +1,11 @@
 import time
 import serial
+from Communicator import SerialCommunicator, SocketCommunicator
 
 # to do:
-#  * status is asynchronous, maybe implement it as a listener. Presumably
-#    the pump will only send one message at a time, then the listener
-#    could determine whether to hand the message back to the response
-#    queue of the Pump class, or whether to use it to set a running flag
-#    (&U messages) or take down a running flag (&X messages). The only
-#    question is how to handle status response, because these have no \r
-#    termination. Maybe the timeout would work. 
-#
-#  * the Moxa interface
+#  * the Moxa interface (implement SocketCommunicator)
 
-class Communicator(object):
-    """
-    Base class for communication to Ismatec Reglo ICC over direct serial 
-    or through a serial server.
-    """
-
-    def __init__(self, debug=False, com=None, socket=None,
-                 baudrate=9600, data_bits=8, stop_bits=1, parity='N', timeout=.1):
-        """
-        kwargs:
-        com (int): COM port (like '/dev/ttyUSB0') to use for direct serial
-        socket (tuple): (hostname, port) to use for serial server
-        baud_rate, data_bits, stop_bits: specific serial settings
-
-        Use write() or query() to write to the specified device.
-        """
-        self.do_debug = debug
-
-        if com is not None:
-            self._commtype = 'serial'
-            self.tty = com
-            self.write = self._comwrite
-            self.query = self._comquery
-        elif socket is not None:
-            self._commtype = 'socket'
-            self.hostname, self.port = socket
-            self.write = self._socketwrite
-            self.query = self._socketquery
-            assert type(self.hostname) == str
-            assert type(self.port) == int
-        else:
-            raise Exception('No communication specified')
-
-        self.serial_details = {'baudrate': baudrate,
-                               'bytesize': data_bits,
-                               'stopbits': stop_bits,
-                               'parity': parity,
-                               'timeout': timeout,}
-
-    def _comwrite(self, cmd):
-        """
-        Writes a command to the device, and returns True if the command
-        is accepted, False otherwise.
-        """
-        with serial.Serial(self.tty, **self.serial_details) as ser:
-            self.debug("writing command '%s' to COM %s" % (cmd, self.tty))
-            ser.write(cmd + '\r')
-            ser.flush()
-            result = ser.read(size=1)
-        if result == '*':
-            return True
-        else:
-            self.debug('WARNING: command %s returned %s'%(cmd, result))
-            return False
-
-    def _comquery(self, cmd):
-        """
-        Writes a query to the device, and returns the answer.
-        """
-        with serial.Serial(self.tty, **self.serial_details) as ser:
-            self.debug("writing query '%s' to COM %s" % (cmd, self.tty))
-            ser.write(cmd + '\r')
-            ser.flush()
-            result = ser.readline()
-            self.debug("got response '%s'"%result.strip())
-        return result
-
-    def _socketwrite(self, cmd):
-        raise NotImplementedError
-
-    def _socketquery(self, cmd):
-        raise NotImplementedError
-
-    def debug(self, msg):
-        if self.do_debug:
-            print msg
-
-
-class Pump(Communicator):
+class Pump(object):
     """
     Class for representing a single Ismatec Reglo ICC multi-channel
     peristaltic pump, controlled over a serial server or direct serial.
@@ -102,27 +17,40 @@ class Pump(Communicator):
     available as self.channels.
     """
 
-    def __init__(self, debug=False, **kwargs):
-        self.do_debug = debug
-        super(Pump, self).__init__(debug=debug, **kwargs)
+    def __init__(self, debug=False, address=None, **kwargs):
+
+        # make a hardware Communicator object
+        if type(address) == str:
+            # serial
+            self.hw = SerialCommunicator(address=address, debug=debug, **kwargs)
+        elif type(address) == tuple and len(address) == 2:
+            # socket
+            self.hw = SocketCommunicator(address=address, debug=debug, **kwargs)
+        else:
+            raise RuntimeError('Specify serial device or (host, port) tuple!')
+        self.hw.start()
 
         # Assign address 1 to pump
-        self.write('@1')
+        self.hw.write('@1')
 
         # Set everything to default
-        self.write('10')
+        self.hw.write('10')
 
         # Enable independent channel addressing
-        self.write('1~1')
+        self.hw.write('1~1')
 
         # Get number of channels
-        nChannels = int(self.query('1xA'))
+        nChannels = int(self.hw.query('1xA'))
 
-        # Disable asynchronous messages
-        self.write('1xE0')
+        # Enable asynchronous messages
+        self.hw.write('1xE1')
 
         # list of channel indices for iteration and checking
         self.channels = range(1, nChannels+1)
+
+        # initial running states
+        self.stop()
+        self.hw.setRunningStatus(False, self.channels)
 
     ####################################################################
     # Properties or setters/getters to be exposed as Tango attributes, #
@@ -130,30 +58,14 @@ class Pump(Communicator):
     ####################################################################
 
     def getPumpVersion(self):
-        return self.query('1#').strip()
+        return self.hw.query('1#').strip()
 
     def getRunning(self, channel):
         """ 
         Returns True if the specified channels is running
         """
         assert channel in self.channels
-        raise NotImplementedError
-
-    def getFlowRate(self, channel):
-        """ 
-        Returns the current flow rate on the specified channel, in 
-        ml/min.
-        """
-        assert channel in self.channels
-        raise NotImplementedError
-
-    def volume(self, channel):
-        """ 
-        Returns the current dispensed volume on the specified channel,
-        in ml.
-        """
-        assert channel in self.channels
-        raise NotImplementedError
+        return self.hw.running[channel]
 
     def getTubingInnerDiameter(self, channel):
         """ 
@@ -161,7 +73,7 @@ class Pump(Communicator):
         specified channel, in mm.
         """
         assert channel in self.channels
-        return float(self.query('%d+'%channel).split(' ')[0])
+        return float(self.hw.query('%d+'%channel).split(' ')[0])
 
     def setTubingInnerDiameter(self, diam, channel=None):
         """
@@ -173,7 +85,7 @@ class Pump(Communicator):
             for ch in self.channels:
                 allgood = allgood and self.setTubingInnerDiameter(diam, channel=ch)
             return allgood
-        return self.write('%d+%s'%(channel, self._discrete2(diam)))
+        return self.hw.write('%d+%s'%(channel, self._discrete2(diam)))
 
     ###########################################
     # Methods to be exposed as Tango commands #
@@ -189,24 +101,26 @@ class Pump(Communicator):
             channel = 0
             maxrates = []
             for ch in self.channels:
-                maxrates.append(float(self.query('%d?'%ch).split(' ')[0]))
+                maxrates.append(float(self.hw.query('%d?'%ch).split(' ')[0]))
             maxrate = min(maxrates)
         else:
-            maxrate = float(self.query('%d?'%channel).split(' ')[0])
+            maxrate = float(self.hw.query('%d?'%channel).split(' ')[0])
         assert channel in self.channels or channel == 0
         # flow rate mode
-        self.write('%dM'%channel)
+        self.hw.write('%dM'%channel)
         # set flow direction
         if rate < 0:
-            self.write('%dK'%channel)
+            self.hw.write('%dK'%channel)
         else:
-            self.write('%dJ'%channel)
+            self.hw.write('%dJ'%channel)
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
-        self.write('%df%s'%(channel, self._volume2(rate)))
+        self.hw.query('%df%s'%(channel, self._volume2(rate)))
+        # make sure the running status gets set from the start to avoid later Sardana troubles
+        self.hw.setRunningStatus(True, channel)
         # start
-        self.write('%dH'%channel)
+        self.hw.write('%dH'%channel)
 
     def dispense(self, vol, rate, channel=None):
         """ 
@@ -218,30 +132,32 @@ class Pump(Communicator):
             channel = 0
             maxrates = []
             for ch in self.channels:
-                maxrates.append(float(self.query('%d?'%ch).split(' ')[0]))
+                maxrates.append(float(self.hw.query('%d?'%ch).split(' ')[0]))
             maxrate = min(maxrates)
         else:
-            maxrate = float(self.query('%d?'%channel).split(' ')[0])
+            maxrate = float(self.hw.query('%d?'%channel).split(' ')[0])
         assert channel in self.channels or channel == 0
         # flow rate mode
-        self.write('%dO'%channel)
+        self.hw.write('%dO'%channel)
         # make volume positive
         if vol < 0:
             vol *= -1
             rate *= -1
         # set flow direction
         if rate < 0:
-            self.write('%dK'%channel)
+            self.hw.write('%dK'%channel)
         else:
-            self.write('%dJ'%channel)
+            self.hw.write('%dJ'%channel)
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
-        self.write('%df%s'%(channel, self._volume2(rate)))
+        self.hw.query('%df%s'%(channel, self._volume2(rate)))
         # set volume
-        self.write('%dv%s'%(channel, self._volume2(vol)))
+        self.hw.query('%dv%s'%(channel, self._volume2(vol)))
+        # make sure the running status gets set from the start to avoid later Sardana troubles
+        self.hw.setRunningStatus(True, channel)
         # start
-        self.write('%dH'%channel)
+        self.hw.write('%dH'%channel)
 
     def stop(self, channel=None):
         """
@@ -251,7 +167,9 @@ class Pump(Communicator):
         # here we can stop all channels by specifying 0
         channel = 0 if channel is None else channel
         assert channel in self.channels or channel == 0
-        return self.write('%dI'%channel)
+        # doing this misses the asynchronous stop signal, so set manually
+        self.hw.setRunningStatus(False, channel)
+        return self.hw.write('%dI'%channel)
 
     ##########################################
     # Helper methods, not for Tango exposure #
@@ -277,9 +195,16 @@ class Pump(Communicator):
 
 
 if __name__ == '__main__':
-    p = Pump(com='/dev/ttyUSB0', debug=True)
+    """
+    Example usage.
+    """
+    p = Pump(address='/dev/ttyUSB0', debug=True)
     p.setTubingInnerDiameter(3.17)
     p.continuousFlow(rate=25, channel=1)
     p.dispense(vol=1, rate=25, channel=2)
-    time.sleep(10)
+    t0 = time.time()
+    while time.time() - t0 < 10:
+        print [p.getRunning(channel=i) for i in p.channels]
+        time.sleep(.5)
     p.stop()
+    print [p.getRunning(channel=i) for i in p.channels]
