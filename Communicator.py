@@ -97,8 +97,10 @@ class Communicator(threading.Thread):
 
     def join(self, timeout=None):
         """ Stop the thread. """
+        self.debug('joining communications thread...')
         self._stop_event.set()
         super(Communicator, self).join(timeout)
+        self.debug('...done')
 
     def debug(self, msg):
         """
