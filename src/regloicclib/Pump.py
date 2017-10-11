@@ -2,9 +2,6 @@ import time
 import serial
 from Communicator import SerialCommunicator, SocketCommunicator
 
-# to do:
-#  * the Moxa interface (implement SocketCommunicator)
-
 class Pump(object):
     """
     Class for representing a single Ismatec Reglo ICC multi-channel
@@ -13,7 +10,7 @@ class Pump(object):
     This class directly reflects the Tango interface: public set/get
     methods or properties reflect Tango attributes and others represent
     Tango commands. For channel-dependent properties, the Tango device
-    should expose an attribute for each channel. The channel labels are 
+    should expose an attribute for each channel. The channel labels are
     available as self.channels.
     """
 
@@ -194,7 +191,7 @@ class Pump(object):
         return '%04d'%int(whole + decimals)
 
 
-if __name__ == '__main__':
+def example_usage():
     """
     Example usage.
     """

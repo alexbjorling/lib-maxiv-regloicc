@@ -111,7 +111,7 @@ class Communicator(threading.Thread):
 
 
 class SerialCommunicator(Communicator):
-    
+
     def init(self):
         """ Initialize serial port. """
         assert type(self.address) == str
