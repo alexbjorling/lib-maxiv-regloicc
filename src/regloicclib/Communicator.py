@@ -1,7 +1,9 @@
 import threading
 from Queue import Queue
 import serial
+import socket
 import time
+import select
 
 class Communicator(threading.Thread):
     """ 
@@ -171,12 +173,75 @@ class SocketCommunicator(Communicator):
     def init(self):
         """ Initialize socket. """
         assert type(self.address) == tuple
-        pass
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect(self.address)
+
+    def timeout_recv(self, size):
+        """ Helper function to receive with a timeout """
+        ready = select.select([self.socket], [], [], self.serial_details['timeout'])
+        if ready[0]:
+            return self.socket.recv(size)
+        return ''
+
+    def readline(self):
+        """ Helper function to read until \r\n """
+        msg = ''
+        t0 = time.time()
+        while True:
+            char = self.timeout_recv(1)
+            msg += char
+            if msg.endswith('\r\n'): break
+            if time.time() - t0 > self.serial_details['timeout']: break
+            time.sleep(.01)
+        return msg
 
     def loop(self):
         """ Do the repetitive work. """
-        pass
+        # deal with commands and queries found in the queues
+        if self.cmd_q.qsize():
+            # disable asynchronous communication
+            self.socket.send('1xE0\r')
+            self.timeout_recv(1)
+            # emtpy the ingoing buffer
+            flush = self.timeout_recv(100)
+            if flush:
+                self.debug('flushed garbage before command: "%s"'%flush)
+            # write command and get result
+            cmd = self.cmd_q.get()
+            self.socket.send(cmd + '\r')
+            res = self.timeout_recv(1)
+            self.res_q.put(res)
+            # enable asynchronous communication
+            self.socket.send('1xE1\r')
+            self.timeout_recv(1)
+        if self.que_q.qsize():
+            # disable asynchronous communication
+            self.socket.send('1xE0\r')
+            self.timeout_recv(1)
+            # emtpy the ingoing buffer
+            flush = self.timeout_recv(100)
+            if flush:
+                self.debug('flushed garbage before query: "%s"'%flush)
+            # write command and get result
+            cmd = self.que_q.get()
+            self.socket.send(cmd + '\r')
+            res = self.readline().strip()
+            self.res_q.put(res)
+            # enable asynchronous communication again
+            self.socket.send('1xE1\r')
+            self.timeout_recv(1)
+        line = self.readline()
+        if line:
+            # check for running message
+            if line[:2] == '^U':
+                ch = int(line[2])
+                self.running[ch] = True
+            elif line[:2] == '^X':
+                ch = int(line[2])
+                self.running[ch] = False
 
     def close(self):
         """ Release resources. """
-        pass
+        self.socket.shutdown(socket.SHUT_RDWR)
+        self.socket.close()
+

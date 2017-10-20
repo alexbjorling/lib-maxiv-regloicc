@@ -195,7 +195,8 @@ def example_usage():
     """
     Example usage.
     """
-    p = Pump(address='/dev/ttyUSB0', debug=True)
+    #p = Pump(address='/dev/ttyUSB0', debug=True)
+    p = Pump(address=('b-nanomax-pump-tmpdev-0', 4001), debug=True, timeout=.2)
     p.setTubingInnerDiameter(3.17)
     p.continuousFlow(rate=25, channel=1)
     p.dispense(vol=1, rate=25, channel=2)
