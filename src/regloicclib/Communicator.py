@@ -1,5 +1,5 @@
 import threading
-from Queue import Queue
+from queue import Queue
 import serial
 import socket
 import time
@@ -50,8 +50,8 @@ class Communicator(threading.Thread):
             for ch in channel:
                 self.running[ch] = status
         elif channel == 0:
-            self.debug('manually setting running status %s on all channels (found %s)'%(status, self.running.keys()))
-            for ch in self.running.keys():
+            self.debug('manually setting running status %s on all channels (found %s)'%(status, list(self.running.keys())))
+            for ch in list(self.running.keys()):
                 self.running[ch] = status
         else:
             self.debug('manually setting running status %s on channel %d'%(status, channel))
@@ -109,7 +109,7 @@ class Communicator(threading.Thread):
         Print debug info.
         """
         if self.do_debug:
-            print msg
+            print(msg)
 
 
 class SerialCommunicator(Communicator):
@@ -124,7 +124,7 @@ class SerialCommunicator(Communicator):
         # deal with commands and queries found in the queues
         if self.cmd_q.qsize():
             # disable asynchronous communication
-            self.ser.write('1xE0\r')
+            self.ser.write(b'1xE0\r')
             self.ser.read(size=1)
             # emtpy the ingoing buffer
             flush = self.ser.read(100)
@@ -132,15 +132,15 @@ class SerialCommunicator(Communicator):
                 self.debug('flushed garbage before command: "%s"'%flush)
             # write command and get result
             cmd = self.cmd_q.get()
-            self.ser.write(cmd + '\r')
+            self.ser.write(cmd + b'\r')
             res = self.ser.read(size=1)
             self.res_q.put(res)
             # enable asynchronous communication
-            self.ser.write('1xE1\r')
+            self.ser.write(b'1xE1\r')
             self.ser.read(size=1)
         if self.que_q.qsize():
             # disable asynchronous communication
-            self.ser.write('1xE0\r')
+            self.ser.write(b'1xE0\r')
             self.ser.read(size=1)
             # emtpy the ingoing buffer
             flush = self.ser.read(100)
@@ -148,11 +148,11 @@ class SerialCommunicator(Communicator):
                 self.debug('flushed garbage before query: "%s"'%flush)
             # write command and get result
             cmd = self.que_q.get()
-            self.ser.write(cmd + '\r')
+            self.ser.write(cmd + b'\r')
             res = self.ser.readline().strip()
             self.res_q.put(res)
             # enable asynchronous communication again
-            self.ser.write('1xE1\r')
+            self.ser.write(b'1xE1\r')
             self.ser.read(size=1)
         line = self.ser.readline()
         if len(line):
@@ -180,7 +180,8 @@ class SocketCommunicator(Communicator):
         """ Helper function to receive with a timeout """
         ready = select.select([self.socket], [], [], self.serial_details['timeout'])
         if ready[0]:
-            return self.socket.recv(size)
+            # decode from bytes to str (default ASCII)
+            return self.socket.recv(size).decode()
         return ''
 
     def readline(self):
@@ -200,7 +201,7 @@ class SocketCommunicator(Communicator):
         # deal with commands and queries found in the queues
         if self.cmd_q.qsize():
             # disable asynchronous communication
-            self.socket.send('1xE0\r')
+            self.socket.send(b'1xE0\r')
             self.timeout_recv(1)
             # emtpy the ingoing buffer
             flush = self.timeout_recv(100)
@@ -208,15 +209,15 @@ class SocketCommunicator(Communicator):
                 self.debug('flushed garbage before command: "%s"'%flush)
             # write command and get result
             cmd = self.cmd_q.get()
-            self.socket.send(cmd + '\r')
+            self.socket.send(cmd + b'\r')
             res = self.timeout_recv(1)
             self.res_q.put(res)
             # enable asynchronous communication
-            self.socket.send('1xE1\r')
+            self.socket.send(b'1xE1\r')
             self.timeout_recv(1)
         if self.que_q.qsize():
             # disable asynchronous communication
-            self.socket.send('1xE0\r')
+            self.socket.send(b'1xE0\r')
             self.timeout_recv(1)
             # emtpy the ingoing buffer
             flush = self.timeout_recv(100)
@@ -224,11 +225,11 @@ class SocketCommunicator(Communicator):
                 self.debug('flushed garbage before query: "%s"'%flush)
             # write command and get result
             cmd = self.que_q.get()
-            self.socket.send(cmd + '\r')
+            self.socket.send(cmd + b'\r')
             res = self.readline().strip()
             self.res_q.put(res)
             # enable asynchronous communication again
-            self.socket.send('1xE1\r')
+            self.socket.send(b'1xE1\r')
             self.timeout_recv(1)
         line = self.readline()
         if line:

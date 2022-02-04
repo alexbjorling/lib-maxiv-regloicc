@@ -1,2 +1,2 @@
-from Pump import *
-from Communicator import *
+from .Pump import *
+from .Communicator import *
