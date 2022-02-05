@@ -1,3 +1,4 @@
+"""Serial or Socket (serial gateway) interfaces for Ismatec Reglo ICC peristaltic pump."""
 import threading
 from queue import Queue
 import serial
@@ -5,19 +6,17 @@ import socket
 import time
 import select
 
-class Communicator(threading.Thread):
-    """ 
-    Class representing the hardware interface to the Ismatec Reglo ICC
-    peristaltic pump.
 
-    It handles the communication via direct serial or through a serial
-    server, and keeps track of the messy mix of synchronous (command) 
-    and asynchronous (status) communication.
+class Communicator(threading.Thread):
+    """Class representing the hardware interface to the Ismatec Reglo ICC peristaltic pump.
+
+    It handles the communication via direct serial or through a serial server, and keeps track
+    of the messy mix of synchronous (command) and asynchronous (status) communication.
     """
 
     def __init__(self, debug=False, address=None,
                  baudrate=9600, data_bits=8, stop_bits=1, parity='N', timeout=.05):
-
+        """Initialize the serial link and create queues for commands and responses."""
         super(Communicator, self).__init__()
         self._stop_event = threading.Event()
 
@@ -36,100 +35,95 @@ class Communicator(threading.Thread):
                                'bytesize': data_bits,
                                'stopbits': stop_bits,
                                'parity': parity,
-                               'timeout': timeout,}
+                               'timeout': timeout}
 
         # initialize communication
         self.init()
 
     def setRunningStatus(self, status, channel):
-        """
-        Manually set running status.
-        """
+        """Manually set running status."""
         if type(channel) == list or type(channel) == tuple:
-            self.debug('manually setting running status %s on channels %s'%(status, channel))
+            self.debug('manually setting running status %s on channels %s' % (status, channel))
             for ch in channel:
                 self.running[ch] = status
         elif channel == 0:
-            self.debug('manually setting running status %s on all channels (found %s)'%(status, list(self.running.keys())))
+            self.debug('manually setting running status %s on all channels (found %s)' %
+                       (status, list(self.running.keys())))
             for ch in list(self.running.keys()):
                 self.running[ch] = status
         else:
-            self.debug('manually setting running status %s on channel %d'%(status, channel))
+            self.debug('manually setting running status %s on channel %d' % (status, channel))
             self.running[channel] = status
 
     def run(self):
+        """Run continously until threading.Event fires."""
         while not self._stop_event.isSet():
             self.loop()
         self.close()
 
     def write(self, cmd):
-        """
-        Place a command in the command queue and return how it went.
-        """
+        """Place a command in the command queue and return how it went."""
         self.debug("writing command '%s' to %s" % (cmd, self.address))
         self.cmd_q.put(cmd)
         result = self.res_q.get()
         if result == '*':
             return True
         else:
-            self.debug('WARNING: command %s returned %s'%(cmd, result))
+            self.debug('WARNING: command %s returned %s' % (cmd, result))
             return False
 
     def query(self, cmd):
-        """
-        Place a query in the query queue and return the answer.
-        """
+        """Place a query in the query queue and return the answer."""
         self.debug("writing query '%s' to %s" % (cmd, self.address))
         self.que_q.put(cmd)
         result = self.res_q.get().strip()
-        self.debug("got response '%s'"%result)
+        self.debug("got response '%s'" % result)
         return result
 
     def init(self):
-        """ Override in subclass. """
+        """Override in subclass."""
         raise NotImplementedError
 
     def loop(self):
-        """ Override in subclass. """
+        """Override in subclass."""
         raise NotImplementedError
 
     def close(self):
-        """ Override in subclass. """
+        """Override in subclass."""
         raise NotImplementedError
 
     def join(self, timeout=None):
-        """ Stop the thread. """
+        """Stop the thread."""
         self.debug('joining communications thread...')
         self._stop_event.set()
         super(Communicator, self).join(timeout)
         self.debug('...done')
 
     def debug(self, msg):
-        """
-        Print debug info.
-        """
+        """Print debug info."""
         if self.do_debug:
             print(msg)
 
 
 class SerialCommunicator(Communicator):
+    """Communicator using a directly-connected RS232 serial device."""
 
     def init(self):
-        """ Initialize serial port. """
+        """Initialize serial port."""
         assert type(self.address) == str
         self.ser = serial.Serial(self.address, **self.serial_details)
 
     def loop(self):
-        """ Do the repetitive work. """
+        """Do the repetitive work."""
         # deal with commands and queries found in the queues
         if self.cmd_q.qsize():
             # disable asynchronous communication
             self.ser.write(b'1xE0\r')
             self.ser.read(size=1)
-            # emtpy the ingoing buffer
+            # empty the ingoing buffer
             flush = self.ser.read(100)
             if flush:
-                self.debug('flushed garbage before command: "%s"'%flush)
+                self.debug('flushed garbage before command: "%s"' % flush)
             # write command and get result
             cmd = self.cmd_q.get()
             self.ser.write(cmd + b'\r')
@@ -142,10 +136,10 @@ class SerialCommunicator(Communicator):
             # disable asynchronous communication
             self.ser.write(b'1xE0\r')
             self.ser.read(size=1)
-            # emtpy the ingoing buffer
+            # empty the ingoing buffer
             flush = self.ser.read(100)
             if flush:
-                self.debug('flushed garbage before query: "%s"'%flush)
+                self.debug('flushed garbage before query: "%s"' % flush)
             # write command and get result
             cmd = self.que_q.get()
             self.ser.write(cmd + b'\r')
@@ -165,19 +159,21 @@ class SerialCommunicator(Communicator):
                 self.running[ch] = False
 
     def close(self):
-        """ Release resources. """
+        """Release resources."""
         self.ser.close()
 
 
 class SocketCommunicator(Communicator):
+    """Communicator using a TCP/IP<=>serial gateway."""
+
     def init(self):
-        """ Initialize socket. """
+        """Initialize socket."""
         assert type(self.address) == tuple
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect(self.address)
 
     def timeout_recv(self, size):
-        """ Helper function to receive with a timeout """
+        """Receive <size> characters from the socket, with a timeout."""
         ready = select.select([self.socket], [], [], self.serial_details['timeout'])
         if ready[0]:
             # decode from bytes to str (default ASCII)
@@ -185,28 +181,30 @@ class SocketCommunicator(Communicator):
         return ''
 
     def readline(self):
-        """ Helper function to read until \r\n """
+        r"""Read serial characters continuously until \r\n."""
         msg = ''
         t0 = time.time()
         while True:
             char = self.timeout_recv(1)
             msg += char
-            if msg.endswith('\r\n'): break
-            if time.time() - t0 > self.serial_details['timeout']: break
+            if msg.endswith('\r\n'):
+                break
+            if time.time() - t0 > self.serial_details['timeout']:
+                break
             time.sleep(.01)
         return msg
 
     def loop(self):
-        """ Do the repetitive work. """
+        """Do the repetitive work."""
         # deal with commands and queries found in the queues
         if self.cmd_q.qsize():
             # disable asynchronous communication
             self.socket.send(b'1xE0\r')
             self.timeout_recv(1)
-            # emtpy the ingoing buffer
+            # empty the ingoing buffer
             flush = self.timeout_recv(100)
             if flush:
-                self.debug('flushed garbage before command: "%s"'%flush)
+                self.debug('flushed garbage before command: "%s"' % flush)
             # write command and get result
             cmd = self.cmd_q.get()
             self.socket.send(cmd + b'\r')
@@ -219,10 +217,10 @@ class SocketCommunicator(Communicator):
             # disable asynchronous communication
             self.socket.send(b'1xE0\r')
             self.timeout_recv(1)
-            # emtpy the ingoing buffer
+            # empty the ingoing buffer
             flush = self.timeout_recv(100)
             if flush:
-                self.debug('flushed garbage before query: "%s"'%flush)
+                self.debug('flushed garbage before query: "%s"' % flush)
             # write command and get result
             cmd = self.que_q.get()
             self.socket.send(cmd + b'\r')
@@ -242,7 +240,6 @@ class SocketCommunicator(Communicator):
                 self.running[ch] = False
 
     def close(self):
-        """ Release resources. """
+        """Release resources."""
         self.socket.shutdown(socket.SHUT_RDWR)
         self.socket.close()
-
