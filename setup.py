@@ -12,4 +12,16 @@ setup(name="python-regloicclib",
       url="http://www.maxiv.lu.se",
       packages=['regloicclib'],
       package_dir={'': 'src'},
+      install_requires=[
+          'pyserial',
+      ],
+      classifiers=[
+          "Development Status :: 4 - Beta",
+          'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+          "Natural Language :: English",
+          "Programming Language :: Python",
+          "Programming Language :: Python :: 3",
+          "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+          "Topic :: Scientific/Engineering :: Chemistry"
+      ]
       )
