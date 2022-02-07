@@ -38,7 +38,10 @@ class Pump(object):
         self.hw.write(b'1~1')
 
         # Get number of channels
-        nChannels = int(self.hw.query(b'1xA'))
+        try:
+            nChannels = int(self.hw.query(b'1xA'))
+        except ValueError:
+            nChannels = 0
 
         # Enable asynchronous messages
         self.hw.write(b'1xE1')
