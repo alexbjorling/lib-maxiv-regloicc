@@ -29,13 +29,13 @@ class Pump(object):
         self.hw.start()
 
         # Assign address 1 to pump
-        self.hw.write(b'@1')
+        self.hw.command(b'@1')
 
         # Set everything to default
-        self.hw.write(b'10')
+        self.hw.command(b'10')
 
         # Enable independent channel addressing
-        self.hw.write(b'1~1')
+        self.hw.command(b'1~1')
 
         # Get number of channels
         try:
@@ -44,7 +44,7 @@ class Pump(object):
             nChannels = 0
 
         # Enable asynchronous messages
-        self.hw.write(b'1xE1')
+        self.hw.command(b'1xE1')
 
         # list of channel indices for iteration and checking
         self.channels = list(range(1, nChannels + 1))
@@ -61,6 +61,12 @@ class Pump(object):
     def getPumpVersion(self):
         """Return the pump model, firmware version, and pump head type code."""
         return self.hw.query(b'1#').strip()
+
+    def getFlowrate(self, channel):
+        """Return the current flowrate of the specified channel."""
+        assert channel in self.channels
+        reply = self.hw.query(b'%df' % channel)
+        return float(reply) if reply else 0
 
     def getRunning(self, channel):
         """Return True if the specified channel is running."""
@@ -83,7 +89,7 @@ class Pump(object):
             for ch in self.channels:
                 allgood = allgood and self.setTubingInnerDiameter(diam, channel=ch)
             return allgood
-        return self.hw.write(b'%d+%s' % (channel, self._discrete2(diam).encode()))
+        return self.hw.command(b'%d+%s' % (channel, self._discrete2(diam).encode()))
 
     ###########################################
     # Methods to be exposed as Tango commands #
@@ -106,12 +112,12 @@ class Pump(object):
             maxrate = float(self.hw.query(b'%d?' % channel).split(' ')[0])
         assert channel in self.channels or channel == 0
         # flow rate mode
-        self.hw.write(b'%dM' % channel)
+        self.hw.command(b'%dM' % channel)
         # set flow direction.  K=clockwise, J=counterclockwise
         if rate < 0:
-            self.hw.write(b'%dK' % channel)
+            self.hw.command(b'%dK' % channel)
         else:
-            self.hw.write(b'%dJ' % channel)
+            self.hw.command(b'%dJ' % channel)
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
@@ -119,7 +125,7 @@ class Pump(object):
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
-        self.hw.write(b'%dH' % channel)
+        self.hw.command(b'%dH' % channel)
 
     def dispense(self, vol, rate, channel=None):
         """
@@ -138,16 +144,16 @@ class Pump(object):
             maxrate = float(self.hw.query(b'%d?' % channel).split(' ')[0])
         assert channel in self.channels or channel == 0
         # flow rate mode
-        self.hw.write(b'%dO' % channel)
+        self.hw.command(b'%dO' % channel)
         # make volume positive
         if vol < 0:
             vol *= -1
             rate *= -1
         # set flow direction
         if rate < 0:
-            self.hw.write(b'%dK' % channel)
+            self.hw.command(b'%dK' % channel)
         else:
-            self.hw.write(b'%dJ' % channel)
+            self.hw.command(b'%dJ' % channel)
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
@@ -157,7 +163,7 @@ class Pump(object):
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
-        self.hw.write(b'%dH' % channel)
+        self.hw.command(b'%dH' % channel)
 
     def stop(self, channel=None):
         """
@@ -170,7 +176,7 @@ class Pump(object):
         assert channel in self.channels or channel == 0
         # doing this misses the asynchronous stop signal, so set manually
         self.hw.setRunningStatus(False, channel)
-        return self.hw.write(b'%dI' % channel)
+        return self.hw.command(b'%dI' % channel)
 
     ##########################################
     # Helper methods, not for Tango exposure #

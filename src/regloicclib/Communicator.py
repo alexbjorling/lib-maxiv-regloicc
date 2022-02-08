@@ -20,9 +20,8 @@ class Communicator(threading.Thread):
         super(Communicator, self).__init__()
         self._stop_event = threading.Event()
 
-        # internal command, query, and response queues
-        self.cmd_q = Queue()
-        self.que_q = Queue()
+        # internal request and response queues
+        self.req_q = Queue()
         self.res_q = Queue()
 
         # dictionary of channel running status
@@ -61,10 +60,10 @@ class Communicator(threading.Thread):
             self.loop()
         self.close()
 
-    def write(self, cmd):
-        """Place a command in the command queue and return how it went."""
+    def command(self, cmd):
+        """Place a command in the request queue and return the response."""
         self.debug("writing command '%s' to %s" % (cmd, self.address))
-        self.cmd_q.put(cmd)
+        self.req_q.put(cmd)
         result = self.res_q.get()
         if result == '*':
             return True
@@ -73,9 +72,9 @@ class Communicator(threading.Thread):
             return False
 
     def query(self, cmd):
-        """Place a query in the query queue and return the answer."""
+        """Place a query in the request queue and return the response."""
         self.debug("writing query '%s' to %s" % (cmd, self.address))
-        self.que_q.put(cmd)
+        self.req_q.put(cmd)
         result = self.res_q.get().strip()
         self.debug("got response '%s'" % result)
         return result
@@ -115,26 +114,10 @@ class SerialCommunicator(Communicator):
 
     def loop(self):
         """Do the repetitive work."""
-        # deal with commands and queries found in the queues
-        if self.cmd_q.qsize():
+        # deal with commands and queries found in the request queue
+        if self.req_q.qsize():
             # disable asynchronous communication
-            self.ser.write(b'1xE0\r')
-            self.ser.read(size=1)
-            # empty the ingoing buffer
-            flush = self.ser.read(100)
-            if flush:
-                self.debug('flushed garbage before command: "%s"' % flush)
-            # write command and get result
-            cmd = self.cmd_q.get()
-            self.ser.write(cmd + b'\r')
-            res = self.ser.read(size=1)
-            self.res_q.put(res)
-            # enable asynchronous communication
-            self.ser.write(b'1xE1\r')
-            self.ser.read(size=1)
-        if self.que_q.qsize():
-            # disable asynchronous communication
-            self.ser.write(b'1xE0\r')
+            self.ser.command(b'1xE0\r')
             self.ser.read(size=1)
             # empty the ingoing buffer
             flush = self.ser.read(100)
@@ -142,11 +125,11 @@ class SerialCommunicator(Communicator):
                 self.debug('flushed garbage before query: "%s"' % flush)
             # write command and get result
             cmd = self.que_q.get()
-            self.ser.write(cmd + b'\r')
+            self.ser.command(cmd + b'\r')
             res = self.ser.readline().strip()
             self.res_q.put(res)
             # enable asynchronous communication again
-            self.ser.write(b'1xE1\r')
+            self.ser.command(b'1xE1\r')
             self.ser.read(size=1)
         line = self.ser.readline()
         if len(line):
@@ -181,13 +164,13 @@ class SocketCommunicator(Communicator):
         return ''
 
     def readline(self):
-        r"""Read serial characters continuously until \r\n."""
+        r"""Read serial characters continuously until \r\n or *."""
         msg = ''
         t0 = time.time()
         while True:
             char = self.timeout_recv(1)
             msg += char
-            if msg.endswith('\r\n'):
+            if msg.endswith('\r\n') or msg.endswith('*'):
                 break
             if time.time() - t0 > self.serial_details['timeout']:
                 break
@@ -196,24 +179,8 @@ class SocketCommunicator(Communicator):
 
     def loop(self):
         """Do the repetitive work."""
-        # deal with commands and queries found in the queues
-        if self.cmd_q.qsize():
-            # disable asynchronous communication
-            self.socket.send(b'1xE0\r')
-            self.timeout_recv(1)
-            # empty the ingoing buffer
-            flush = self.timeout_recv(100)
-            if flush:
-                self.debug('flushed garbage before command: "%s"' % flush)
-            # write command and get result
-            cmd = self.cmd_q.get()
-            self.socket.send(cmd + b'\r')
-            res = self.timeout_recv(1)
-            self.res_q.put(res)
-            # enable asynchronous communication
-            self.socket.send(b'1xE1\r')
-            self.timeout_recv(1)
-        if self.que_q.qsize():
+        # deal with commands and queries found in the request queue
+        if self.req_q.qsize():
             # disable asynchronous communication
             self.socket.send(b'1xE0\r')
             self.timeout_recv(1)
@@ -222,7 +189,7 @@ class SocketCommunicator(Communicator):
             if flush:
                 self.debug('flushed garbage before query: "%s"' % flush)
             # write command and get result
-            cmd = self.que_q.get()
+            cmd = self.req_q.get()
             self.socket.send(cmd + b'\r')
             res = self.readline().strip()
             self.res_q.put(res)
@@ -232,12 +199,15 @@ class SocketCommunicator(Communicator):
         line = self.readline()
         if line:
             # check for running message
-            if line[:2] == '^U':
-                ch = int(line[2])
-                self.running[ch] = True
-            elif line[:2] == '^X':
-                ch = int(line[2])
-                self.running[ch] = False
+            try:
+                if line[:2] == '^U':
+                    ch = int(line[2])
+                    self.running[ch] = True
+                elif line[:2] == '^X':
+                    ch = int(line[2])
+                    self.running[ch] = False
+            except IndexError:
+                self.debug('received message: "%s"' % line)
 
     def close(self):
         """Release resources."""
