@@ -127,13 +127,16 @@ class Pump(object):
         # start
         self.hw.command(b'%dH' % channel)
 
-    def dispense(self, vol, rate, channel=None):
+    def dispense_at_rate(self, vol, rate, units='ml/min', channel=None):
         """
-        Dispense vol (ml) at rate (ml/min) on specified channel.
+        Dispense vol (ml) at rate on specified channel.
 
+        Rate is specified by units, either 'ml/min' or 'rpm'.
         If no channel is specified, dispense on all channels.
         """
-        if channel is None:
+        if units == 'rpm':
+            maxrate = 100
+        elif channel is None:
             # this enables fairly synchronous start
             channel = 0
             maxrates = []
@@ -143,7 +146,7 @@ class Pump(object):
         else:
             maxrate = float(self.hw.query(b'%d?' % channel).split(' ')[0])
         assert channel in self.channels or channel == 0
-        # flow rate mode
+        # volume at rate mode
         self.hw.command(b'%dO' % channel)
         # make volume positive
         if vol < 0:
@@ -158,8 +161,36 @@ class Pump(object):
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
         self.hw.query(b'%df%s' % (channel, self._volume2(rate)))
+        if units == 'rpm':
+            self.hw.command(b'%dS%s' % (channel, self._discrete3(rate * 100)))
+        else:
+            self.hw.query(b'%df%s' % (channel, self._volume2(rate)))
         # set volume
         self.hw.query(b'%dv%s' % (channel, self._volume2(vol)))
+        # make sure the running status gets set from the start to avoid later Sardana troubles
+        self.hw.setRunningStatus(True, channel)
+        # start
+        self.hw.command(b'%dH' % channel)
+
+    def dispense_over_time(self, vol, time, channel=0):
+        """
+        Dispense vol (ml) over time (s) on specified channel.
+
+        If no channel is specified, dispense on all channels.
+        """
+        assert channel in self.channels or channel == 0
+        # volume over time mode
+        self.hw.command(b'%dG' % channel)
+        # set flow direction
+        if vol < 0:
+            self.hw.command(b'%dK' % channel)
+            vol *= -1
+        else:
+            self.hw.command(b'%dJ' % channel)
+        # set volume
+        self.hw.query(b'%dv%s' % (channel, self._volume2(vol)))
+        # set time.  Note: if the time is too short, the pump will not start.
+        self.hw.query(b'%dxT%s' % (channel, self._time1(time)))
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
@@ -227,7 +258,7 @@ def example_usage():
     p = Pump(address=('b-nanomax-pump-tmpdev-0', 4001), debug=True, timeout=.2)
     p.setTubingInnerDiameter(3.17)
     p.continuousFlow(rate=25, channel=1)
-    p.dispense(vol=1, rate=25, channel=2)
+    p.dispense_at_rate(vol=1, rate=25, channel=2)
     t0 = time.time()
     while time.time() - t0 < 10:
         print([p.getRunning(channel=i) for i in p.channels])
