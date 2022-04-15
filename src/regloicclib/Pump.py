@@ -89,7 +89,7 @@ class Pump(object):
             for ch in self.channels:
                 allgood = allgood and self.setTubingInnerDiameter(diam, channel=ch)
             return allgood
-        return self.hw.command(b'%d+%s' % (channel, self._discrete2(diam).encode()))
+        return self.hw.command(b'%d+%s' % (channel, self._discrete2(diam)))
 
     ###########################################
     # Methods to be exposed as Tango commands #
@@ -121,7 +121,7 @@ class Pump(object):
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
-        self.hw.query(b'%df%s' % (channel, self._volume2(rate).encode()))
+        self.hw.query(b'%df%s' % (channel, self._volume2(rate)))
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
@@ -157,9 +157,9 @@ class Pump(object):
         # set flow rate
         if abs(rate) > maxrate:
             rate = rate / abs(rate) * maxrate
-        self.hw.query(b'%df%s' % (channel, self._volume2(rate).encode()))
+        self.hw.query(b'%df%s' % (channel, self._volume2(rate)))
         # set volume
-        self.hw.query(b'%dv%s' % (channel, self._volume2(vol).encode()))
+        self.hw.query(b'%dv%s' % (channel, self._volume2(vol)))
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
@@ -181,24 +181,43 @@ class Pump(object):
     ##########################################
     # Helper methods, not for Tango exposure #
     ##########################################
+    def _time1(self, number, units='s'):
+        """Convert number to 'time type 1'.
+
+        8 digits, 0 to 35964000 in units of 0.1s
+        (0 to 999 hr)
+        """
+        number = 10 * number  # 0.1s
+        if units == 'm':
+            number = 60 * number
+        if units == 'h':
+            number = 60 * number
+        return str(min(number, 35964000)).encode()
 
     def _volume2(self, number):
         # convert number to "volume type 2"
         number = '%.3e' % abs(number)
         number = number[0] + number[2:5] + number[-3] + number[-1]
-        return number
+        return number.encode()
 
     def _volume1(self, number):
         # convert number to "volume type 1"
         number = '%.3e' % abs(number)
         number = number[0] + number[2:5] + 'E' + number[-3] + number[-1]
-        return number
+        return number.encode()
 
     def _discrete2(self, number):
         # convert float to "discrete type 2"
         s = str(number).strip('0')
         whole, decimals = s.split('.')
-        return '%04d' % int(whole + decimals)
+        return b'%04d' % int(whole + decimals)
+
+    def _discrete3(self, number):
+        """Convert number to 'discrete type 3'.
+
+        6 digits, 0 to 999999, left-padded with zeroes
+        """
+        return str(number).zfill(6).encode()
 
 
 def example_usage():
