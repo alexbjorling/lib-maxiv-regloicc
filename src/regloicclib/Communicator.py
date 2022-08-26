@@ -55,7 +55,7 @@ class Communicator(threading.Thread):
             self.running[channel] = status
 
     def run(self):
-        """Run continously until threading.Event fires."""
+        """Run continuously until threading.Event fires."""
         while not self._stop_event.isSet():
             self.loop()
         self.close()

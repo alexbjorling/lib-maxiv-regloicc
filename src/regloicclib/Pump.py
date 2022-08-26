@@ -82,7 +82,7 @@ class Pump(object):
         """
         Set the peristaltic tubing inner diameter on the specified channel, in mm.
 
-        If no channel is specificed, set it on all channels.
+        If no channel is specified, set it on all channels.
         """
         if channel is None:
             allgood = True
