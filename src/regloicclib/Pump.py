@@ -215,7 +215,7 @@ class Pump(object):
     def _time1(self, number, units='s'):
         """Convert number to 'time type 1'.
 
-        8 digits, 0 to 35964000 in units of 0.1s
+        1-8 digits, 0 to 35964000 in units of 0.1s
         (0 to 999 hr)
         """
         number = 10 * number  # 0.1s
@@ -224,6 +224,19 @@ class Pump(object):
         if units == 'h':
             number = 60 * number
         return str(min(number, 35964000)).encode()
+
+    def _time2(self, number, units='s'):
+        """Convert number to 'time type 2'.
+
+        8 digits, 0 to 35964000 in units of 0.1s, left-padded with zeroes
+        (0 to 999 hr)
+        """
+        number = 10 * number  # 0.1s
+        if units == 'm':
+            number = 60 * number
+        if units == 'h':
+            number = 60 * number
+        return str(min(number, 35964000)).zfill(8).encode()
 
     def _volume2(self, number):
         # convert number to "volume type 2"
