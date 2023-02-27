@@ -127,7 +127,7 @@ class Pump(object):
         # start
         self.hw.command(b'%dH' % channel)
 
-    def dispense_at_rate(self, vol, rate, units='ml/min', channel=None):
+    def dispense_vol_at_rate(self, vol, rate, units='ml/min', channel=None):
         """
         Dispense vol (ml) at rate on specified channel.
 
@@ -172,9 +172,9 @@ class Pump(object):
         # start
         self.hw.command(b'%dH' % channel)
 
-    def dispense_over_time(self, vol, time, channel=0):
+    def dispense_vol_over_time(self, vol, time, channel=0):
         """
-        Dispense vol (ml) over time (s) on specified channel.
+        Dispense vol (ml) over time (min) on specified channel.
 
         If no channel is specified, dispense on all channels.
         """
@@ -190,7 +190,34 @@ class Pump(object):
         # set volume
         self.hw.query(b'%dv%s' % (channel, self._volume2(vol)))
         # set time.  Note: if the time is too short, the pump will not start.
-        self.hw.query(b'%dxT%s' % (channel, self._time1(time)))
+        self.hw.query(b'%dxT%s' % (channel, self._time2(time, units='m')))
+        # make sure the running status gets set from the start to avoid later Sardana troubles
+        self.hw.setRunningStatus(True, channel)
+        # start
+        self.hw.command(b'%dH' % channel)
+
+    def dispense_flow_over_time(self, rate, time, units='ml/min', channel=0):
+        """
+        Dispense at a set flowrate over time (min) on specified channel.
+
+        Rate is specified by units, either 'ml/min' or 'rpm'.
+        If no channel is specified, dispense on all channels.
+        """
+        assert channel in self.channels or channel == 0
+        # set flow direction
+        if rate < 0:
+            self.hw.command(b'%dK' % channel)
+            rate *= -1
+        else:
+            self.hw.command(b'%dJ' % channel)
+        # set to flowrate mode first, otherwise Time mode uses RPMs
+        self.hw.query(b'%dM' % channel)
+        # Set to flowrate over time ("Time") mode
+        self.hw.command(b'%dN' % channel)
+        # set flowrate
+        self.hw.query(b'%df%s' % (channel, self._volume2(rate)))
+        # set time.  Note: if the time is too short, the pump will not start.
+        self.hw.query(b'%dxT%s' % (channel, self._time2(time, units='m')))
         # make sure the running status gets set from the start to avoid later Sardana troubles
         self.hw.setRunningStatus(True, channel)
         # start
@@ -215,7 +242,7 @@ class Pump(object):
     def _time1(self, number, units='s'):
         """Convert number to 'time type 1'.
 
-        8 digits, 0 to 35964000 in units of 0.1s
+        1-8 digits, 0 to 35964000 in units of 0.1s
         (0 to 999 hr)
         """
         number = 10 * number  # 0.1s
@@ -223,7 +250,20 @@ class Pump(object):
             number = 60 * number
         if units == 'h':
             number = 60 * number
-        return str(min(number, 35964000)).encode()
+        return str(min(number, 35964000)).replace('.', '').encode()
+
+    def _time2(self, number, units='s'):
+        """Convert number to 'time type 2'.
+
+        8 digits, 0 to 35964000 in units of 0.1s, left-padded with zeroes
+        (0 to 999 hr)
+        """
+        number = 10 * number  # 0.1s
+        if units == 'm':
+            number = 60 * number
+        if units == 'h':
+            number = 60 * number
+        return str(min(number, 35964000)).replace('.', '').zfill(8).encode()
 
     def _volume2(self, number):
         # convert number to "volume type 2"

@@ -174,7 +174,6 @@ class SocketCommunicator(Communicator):
                 break
             if time.time() - t0 > self.serial_details['timeout']:
                 break
-            time.sleep(.01)
         return msg
 
     def loop(self):
